@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Yohan TG</string>
+    <string name="api_id_hint">API ID</string>
+    <string name="api_hash_hint">API Hash</string>
+    <string name="phone_hint">رقم الهاتف (+201234567890)</string>
+    <string name="code_hint">كود التحقق</string>
+    <string name="password_hint">كلمة مرور التحقق بخطوتين</string>
+    <string name="source_link_hint">رابط المجموعة المصدر</string>
+    <string name="target_link_hint">رابط المجموعة الهدف</string>
+    <string name="btn_next">التالي</string>
+    <string name="btn_login">تسجيل الدخول</string>
+    <string name="btn_start">بدء الإضافة</string>
+    <string name="btn_add_account">إضافة حساب آخر</string>
+    <string name="status_ready">جاهز</string>
+</resources>

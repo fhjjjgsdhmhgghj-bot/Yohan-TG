@@ -1,2 +1,29 @@
-# Yohan-TG
-Yohan TG - Android Telegram member adder (multi-account, no admin required, pure client)
+# Telegram Member Adder — Android
+
+تطبيق أندرويد نقي (بدون سيرفر) لإضافة أعضاء من مجموعة مصدر إلى مجموعة هدف.
+
+## الميزات
+- يطلب **API ID** ثم **API Hash** من المستخدم
+- دعم **عدة حسابات** (Multi-account)
+- تسجيل دخول كامل: رقم هاتف → كود → كلمة مرور 2FA إن وُجدت
+- **لا يحتاج** أن يكون الحساب مشرفاً في المجموعة الهدف
+- جمع الأعضاء الذين أرسلوا رسائل في المجموعة المصدر
+- إضافة سريعة مع التحكم في السرعة
+- يعمل 100% على الجهاز (Client-side only)
+- بناء تلقائي لـ APK عبر GitHub Actions
+
+## المتطلبات
+- Android 8.0+ (API 26)
+- حساب Telegram
+- API ID و API Hash من https://my.telegram.org
+
+## البناء المحلي
+1. افتح المشروع في Android Studio
+2. Sync Gradle
+3. Run
+
+## البناء التلقائي
+ادفع إلى `main` → GitHub Actions يبني APK ويرفعه كـ Artifact.
+
+## ملاحظة
+هذا تطبيق عميل مباشر. استخدمه بمسؤولية.

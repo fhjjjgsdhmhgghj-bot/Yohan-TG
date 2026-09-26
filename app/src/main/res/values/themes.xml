@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MemberAdder" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#1A1A2E</item>
+        <item name="colorPrimaryVariant">#16213E</item>
+        <item name="colorOnPrimary">#E94560</item>
+        <item name="colorSecondary">#0F3460</item>
+        <item name="android:statusBarColor">#0F0F1A</item>
+        <item name="android:navigationBarColor">#0F0F1A</item>
+        <item name="android:windowBackground">#0F0F1A</item>
+    </style>
+</resources>
