@@ -27,8 +27,6 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" 2>/dev/null || true
-          # Ensure apksigner is available
-          ls $ANDROID_HOME/build-tools/34.0.0/apksigner || true
 
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -43,10 +41,15 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Sign APK with apksigner (v1+v2+v3)
+      - name: Align and Sign APK
         run: |
+          set -e
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
-          echo "APK before: $APK ($(du -h "$APK" | cut -f1))"
+          echo "Original APK: $APK ($(du -h "$APK" | cut -f1))"
+          
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          ZIPALIGN="$BT/zipalign"
+          APKSIGNER="$BT/apksigner"
           
           DEBUG_KS="$HOME/.android/debug.keystore"
           mkdir -p "$HOME/.android"
@@ -56,13 +59,17 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
-          if [ ! -f "$APKSIGNER" ]; then
-            APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | head -1)
-          fi
-          echo "Using apksigner: $APKSIGNER"
-
-          # Sign with v1 + v2 + v3
+          # Strip existing signature then realign
+          UNSIGNED="/tmp/app-unsigned.apk"
+          ALIGNED="/tmp/app-aligned.apk"
+          SIGNED="app/build/outputs/apk/debug/YohanTG.apk"
+          
+          # Remove old signature entries
+          cp "$APK" "$UNSIGNED"
+          zip -d "$UNSIGNED" 'META-INF/*' 2>/dev/null || true
+          
+          "$ZIPALIGN" -f -p 4 "$UNSIGNED" "$ALIGNED"
+          
           "$APKSIGNER" sign \
             --ks "$DEBUG_KS" \
             --ks-pass pass:android \
@@ -71,18 +78,17 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            "$APK"
-
-          echo "=== Verify signature ==="
-          "$APKSIGNER" verify --verbose "$APK" || true
+            --out "$SIGNED" \
+            "$ALIGNED"
           
-          echo "=== META-INF check ==="
-          unzip -l "$APK" | grep -E "META-INF/" | head -20
+          "$APKSIGNER" verify --verbose "$SIGNED"
+          ls -lh "$SIGNED"
+          echo "FINAL_APK=$SIGNED" >> $GITHUB_ENV
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: YohanTG-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/YohanTG.apk
           retention-days: 14
           if-no-files-found: error
