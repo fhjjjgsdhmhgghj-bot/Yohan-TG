@@ -1,9 +1,9 @@
 """
 Telegram Member Adder Engine
-Adapted from original Telethon userbot.
 - Multi-account support via separate session files
 - No admin rights required on target group
-- Pure client-side, no server
+- Pure client-side
+- Fixed: no shared client across asyncio.run() calls
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import json
 import os
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.functions.channels import InviteToChannelRequest, GetParticipantRequest
+from telethon.tl.functions.channels import InviteToChannelRequest
 from telethon.errors import (
     FloodWaitError,
     UserPrivacyRestrictedError,
@@ -19,7 +19,7 @@ from telethon.errors import (
     SessionPasswordNeededError,
 )
 
-# In-memory state for pending logins (phone_code_hash etc.)
+# Store only serializable state (never the client object)
 _pending = {}
 
 
@@ -42,36 +42,40 @@ def _save_session(base_dir: str, name: str, session_string: str):
 
 
 def send_code(api_id: int, api_hash: str, phone: str, session_name: str, base_dir: str) -> str:
-    """Send verification code. Called from Kotlin."""
+    """Send verification code."""
     async def _run():
         session_str = _load_session(base_dir, session_name)
         client = TelegramClient(
             StringSession(session_str) if session_str else StringSession(),
-            api_id,
-            api_hash,
+            int(api_id),
+            str(api_hash),
         )
         await client.connect()
-        if await client.is_user_authorized():
-            me = await client.get_me()
+        try:
+            if await client.is_user_authorized():
+                me = await client.get_me()
+                session_string = client.session.save()
+                _save_session(base_dir, session_name, session_string)
+                return json.dumps({
+                    "status": "ok",
+                    "already": True,
+                    "name": f"{me.first_name} (@{me.username or ''})",
+                })
+
+            sent = await client.send_code_request(str(phone))
+            # Save session mid-login so we can reconnect later
             session_string = client.session.save()
             _save_session(base_dir, session_name, session_string)
+            _pending[session_name] = {
+                "phone": str(phone),
+                "phone_code_hash": sent.phone_code_hash,
+                "api_id": int(api_id),
+                "api_hash": str(api_hash),
+                "base_dir": base_dir,
+            }
+            return json.dumps({"status": "ok"})
+        finally:
             await client.disconnect()
-            return json.dumps({
-                "status": "ok",
-                "already": True,
-                "name": f"{me.first_name} (@{me.username or ''})",
-            })
-
-        sent = await client.send_code_request(phone)
-        _pending[session_name] = {
-            "client": client,
-            "phone": phone,
-            "phone_code_hash": sent.phone_code_hash,
-            "api_id": api_id,
-            "api_hash": api_hash,
-            "base_dir": base_dir,
-        }
-        return json.dumps({"status": "ok"})
 
     try:
         return asyncio.run(_run())
@@ -84,29 +88,40 @@ def sign_in(session_name: str, base_dir: str, code: str) -> str:
     async def _run():
         data = _pending.get(session_name)
         if not data:
-            return json.dumps({"status": "error", "error": "no pending login"})
+            return json.dumps({"status": "error", "error": "no pending login — أعد إرسال الكود"})
 
-        client = data["client"]
+        session_str = _load_session(base_dir, session_name)
+        client = TelegramClient(
+            StringSession(session_str) if session_str else StringSession(),
+            data["api_id"],
+            data["api_hash"],
+        )
+        await client.connect()
         try:
-            await client.sign_in(
-                data["phone"],
-                code,
-                phone_code_hash=data["phone_code_hash"],
-            )
-        except SessionPasswordNeededError:
-            return json.dumps({"status": "2fa"})
-        except Exception as e:
-            return json.dumps({"status": "error", "error": str(e)})
+            try:
+                await client.sign_in(
+                    data["phone"],
+                    str(code),
+                    phone_code_hash=data["phone_code_hash"],
+                )
+            except SessionPasswordNeededError:
+                # Keep pending for password step
+                session_string = client.session.save()
+                _save_session(base_dir, session_name, session_string)
+                return json.dumps({"status": "2fa"})
+            except Exception as e:
+                return json.dumps({"status": "error", "error": str(e)})
 
-        session_string = client.session.save()
-        _save_session(base_dir, session_name, session_string)
-        me = await client.get_me()
-        await client.disconnect()
-        del _pending[session_name]
-        return json.dumps({
-            "status": "ok",
-            "name": f"{me.first_name} (@{me.username or ''})",
-        })
+            session_string = client.session.save()
+            _save_session(base_dir, session_name, session_string)
+            me = await client.get_me()
+            del _pending[session_name]
+            return json.dumps({
+                "status": "ok",
+                "name": f"{me.first_name} (@{me.username or ''})",
+            })
+        finally:
+            await client.disconnect()
 
     try:
         return asyncio.run(_run())
@@ -121,21 +136,30 @@ def check_password(session_name: str, base_dir: str, password: str) -> str:
         if not data:
             return json.dumps({"status": "error", "error": "no pending login"})
 
-        client = data["client"]
+        session_str = _load_session(base_dir, session_name)
+        client = TelegramClient(
+            StringSession(session_str) if session_str else StringSession(),
+            data["api_id"],
+            data["api_hash"],
+        )
+        await client.connect()
         try:
-            await client.sign_in(password=password)
-        except Exception as e:
-            return json.dumps({"status": "error", "error": str(e)})
+            try:
+                await client.sign_in(password=str(password))
+            except Exception as e:
+                return json.dumps({"status": "error", "error": str(e)})
 
-        session_string = client.session.save()
-        _save_session(base_dir, session_name, session_string)
-        me = await client.get_me()
-        await client.disconnect()
-        del _pending[session_name]
-        return json.dumps({
-            "status": "ok",
-            "name": f"{me.first_name} (@{me.username or ''})",
-        })
+            session_string = client.session.save()
+            _save_session(base_dir, session_name, session_string)
+            me = await client.get_me()
+            if session_name in _pending:
+                del _pending[session_name]
+            return json.dumps({
+                "status": "ok",
+                "name": f"{me.first_name} (@{me.username or ''})",
+            })
+        finally:
+            await client.disconnect()
 
     try:
         return asyncio.run(_run())
@@ -153,7 +177,6 @@ def _extract_username(link: str) -> str:
 
 
 async def _collect_users(client: TelegramClient, source_entity) -> list:
-    """Collect unique user IDs who sent messages in the source group."""
     all_users = {}
     all_messages = []
 
@@ -180,9 +203,7 @@ async def _collect_users(client: TelegramClient, source_entity) -> list:
 
     for msg in all_messages:
         if msg.sender_id and msg.sender_id > 0:
-            uid = msg.sender_id
-            if uid not in all_users:
-                all_users[uid] = True
+            all_users[msg.sender_id] = True
 
     return list(all_users.keys())
 
@@ -217,7 +238,7 @@ async def _run_one_account(
     if not session_str:
         return {"session": session_name, "error": "no session"}
 
-    client = TelegramClient(StringSession(session_str), api_id, api_hash)
+    client = TelegramClient(StringSession(session_str), int(api_id), str(api_hash))
     await client.connect()
 
     if not await client.is_user_authorized():
@@ -231,7 +252,6 @@ async def _run_one_account(
         await client.disconnect()
         return {"session": session_name, "error": f"group access: {e}"}
 
-    # No admin check — as requested
     users = await _collect_users(client, source_entity)
     if not users:
         await client.disconnect()
@@ -270,10 +290,6 @@ def run_adder(
     target_link: str,
     concurrency: int,
 ) -> str:
-    """
-    Main entry: run the adder across all accounts.
-    No admin rights required on target.
-    """
     async def _run():
         results = []
         logs = []
@@ -283,8 +299,8 @@ def run_adder(
         for name in session_names:
             logs.append(f"[{name}] بدء...")
             res = await _run_one_account(
-                api_id, api_hash, name, base_dir,
-                source_link, target_link, concurrency,
+                int(api_id), str(api_hash), name, base_dir,
+                source_link, target_link, int(concurrency),
             )
             results.append(res)
             if "error" in res:
