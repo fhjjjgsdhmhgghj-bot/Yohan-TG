@@ -20,24 +20,28 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Install required SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" || true
 
       - name: Create local.properties
-        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Setup Gradle Wrapper
-        run: |
-          if [ ! -f gradlew ]; then
-            gradle wrapper --gradle-version 8.9 || true
-          fi
-          chmod +x gradlew 2>/dev/null || true
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Build Debug APK
         run: |
-          if [ -f gradlew ]; then
-            ./gradlew assembleDebug --no-daemon --stacktrace
-          else
-            echo "No gradlew found, skipping build"
+          # Generate wrapper if missing
+          if [ ! -f gradlew ]; then
+            gradle wrapper --gradle-version 8.9
           fi
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
