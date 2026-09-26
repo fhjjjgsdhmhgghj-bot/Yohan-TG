@@ -23,25 +23,24 @@ jobs:
         with:
           packages: ''
 
-      - name: Install required SDK packages
+      - name: Install SDK packages
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" || true
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" 2>/dev/null || true
 
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Generate Gradle Wrapper
+        run: |
+          # Download gradle 8.7 and generate wrapper
+          curl -sL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          /tmp/gradle-8.7/bin/gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
 
       - name: Build Debug APK
-        run: |
-          # Generate wrapper if missing
-          if [ ! -f gradlew ]; then
-            gradle wrapper --gradle-version 8.9
-          fi
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
