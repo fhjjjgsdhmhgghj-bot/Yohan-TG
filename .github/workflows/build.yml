@@ -33,7 +33,6 @@ jobs:
 
       - name: Generate Gradle Wrapper
         run: |
-          # Download gradle 8.7 and generate wrapper
           curl -sL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
           /tmp/gradle-8.7/bin/gradle wrapper --gradle-version 8.7
@@ -42,11 +41,35 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
+      - name: Verify APK signed
+        run: |
+          APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          echo "APK: $APK"
+          ls -lh "$APK"
+          # Check for signature
+          unzip -l "$APK" | grep -E "META-INF/.*\.(RSA|SF|MF)" || echo "WARNING: No signature entries found"
+          # Re-sign with debug keystore if needed
+          DEBUG_KS="$HOME/.android/debug.keystore"
+          if [ ! -f "$DEBUG_KS" ]; then
+            keytool -genkey -v -keystore "$DEBUG_KS" -storepass android -alias androiddebugkey \
+              -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          # Always sign explicitly with apksigner or jarsigner
+          if command -v apksigner >/dev/null 2>&1; then
+            apksigner sign --ks "$DEBUG_KS" --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey "$APK"
+          else
+            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+              -keystore "$DEBUG_KS" -storepass android -keypass android \
+              "$APK" androiddebugkey
+          fi
+          echo "=== After signing ==="
+          unzip -l "$APK" | grep -E "META-INF/.*\.(RSA|SF|MF)" || true
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: YohanTG-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
