@@ -27,6 +27,8 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" 2>/dev/null || true
+          # Ensure apksigner is available
+          ls $ANDROID_HOME/build-tools/34.0.0/apksigner || true
 
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -41,30 +43,41 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Verify APK signed
+      - name: Sign APK with apksigner (v1+v2+v3)
         run: |
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
-          echo "APK: $APK"
-          ls -lh "$APK"
-          # Check for signature
-          unzip -l "$APK" | grep -E "META-INF/.*\.(RSA|SF|MF)" || echo "WARNING: No signature entries found"
-          # Re-sign with debug keystore if needed
+          echo "APK before: $APK ($(du -h "$APK" | cut -f1))"
+          
           DEBUG_KS="$HOME/.android/debug.keystore"
+          mkdir -p "$HOME/.android"
           if [ ! -f "$DEBUG_KS" ]; then
-            keytool -genkey -v -keystore "$DEBUG_KS" -storepass android -alias androiddebugkey \
+            keytool -genkeypair -v -keystore "$DEBUG_KS" -storepass android -alias androiddebugkey \
               -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
-          # Always sign explicitly with apksigner or jarsigner
-          if command -v apksigner >/dev/null 2>&1; then
-            apksigner sign --ks "$DEBUG_KS" --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey "$APK"
-          else
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-              -keystore "$DEBUG_KS" -storepass android -keypass android \
-              "$APK" androiddebugkey
+
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          if [ ! -f "$APKSIGNER" ]; then
+            APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | head -1)
           fi
-          echo "=== After signing ==="
-          unzip -l "$APK" | grep -E "META-INF/.*\.(RSA|SF|MF)" || true
+          echo "Using apksigner: $APKSIGNER"
+
+          # Sign with v1 + v2 + v3
+          "$APKSIGNER" sign \
+            --ks "$DEBUG_KS" \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            "$APK"
+
+          echo "=== Verify signature ==="
+          "$APKSIGNER" verify --verbose "$APK" || true
+          
+          echo "=== META-INF check ==="
+          unzip -l "$APK" | grep -E "META-INF/" | head -20
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
